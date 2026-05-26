@@ -1,5 +1,5 @@
 ;	// =====================================================================
-;	// cwd.asm -- current-working-directory helpers for the read-only FAT API
+;	// cwd.asm -- current-working-directory helpers for the FAT API
 ;	// =====================================================================
 ;	// Public API:
 ;	//   cwd_init                 -> reset current directory to "/"

@@ -1,19 +1,3 @@
-;	//
-;	// PLATFORM INTERFACE  (the integrator MUST supply these two routines)
-;	// ---------------------------------------------------------------------
-;	//
-;	//   read_sector   in : HL   = address of a 512-byte buffer
-;	//                      DEBC = 32-bit LBA  (DE = high word, BC = low)
-;	//                 out: CF=0 success, CF=1 failure
-;	//                 may corrupt: every register
-;	//
-;	//   write_sector  in : HL   = address of a 512-byte buffer
-;	//                      DEBC = 32-bit LBA  (DE = high word, BC = low)
-;	//                 out: CF=0 success, CF=1 failure
-;	//                 may corrupt: every register
-;	//
-;	// Sectors are 512 bytes.  All multi-byte values are little-endian.
-;	//
 ;	// ---------------------------------------------------------------------
 ;	// PUBLIC API   (all routines: CF=0 ok / CF=1 fail with A = error code)
 ;	// ---------------------------------------------------------------------
@@ -281,7 +265,7 @@ iszero32:
 	ret
 
 ;	// =====================================================================
-;	// buffered I/O : two write-back sector caches
+;	// buffered I/O : two sector caches
 ;	//   slot 0  -> FAT sectors only
 ;	//   slot 1  -> directory + file-data sectors
 ;	// =====================================================================
@@ -317,6 +301,10 @@ cache_addr:
 ;	// cache_flush_sel : flush the currently-selected slot if dirty.
 ;	//   out: CF=1 on I/O error.  trashes A,BC,DE,HL.
 cache_flush_sel:
+	IFDEF RO
+	or a
+	ret
+	ELSE
 	ld hl,(cflagp)
 	bit 1,(hl)			;	// dirty?
 	jr nz,.dirty
@@ -358,6 +346,7 @@ cache_flush_sel:
 	res 1,(hl)			;	// clear dirty
 	or a				;	// CF=0
 	ret
+	ENDIF
 
 ;	// lba_into_debc : load the 32-bit LBA at (HL) into DEBC.  trashes A,HL.
 lba_into_debc:
@@ -416,6 +405,7 @@ cache_get:
 	or a
 	ret
 
+	IFNDEF RO
 ;	// cache_get_blank : like cache_get but does NOT read the sector --
 ;	//   used when the caller is going to overwrite the whole sector.
 ;	//   in : A = slot, reqlba = wanted LBA.  out: HL = buffer, CF=err
@@ -448,10 +438,11 @@ cache_flush_all:
 	ld a,1
 	call cache_addr
 	jp cache_flush_sel
+	ENDIF
 
-;	// wr_sector_raw / rd_sector_raw : call the integrator hooks, saving
-;	//   the driver's IX (active handle pointer) across the call.
-;	//   in: HL=buffer, DEBC=LBA.  out: CF.
+	;	// rd_sector_raw : call the integrator hook, saving the driver's IX
+	;	//   (active handle pointer) across the call.
+	;	//   in: HL=buffer, DEBC=LBA.  out: CF.
 rd_sector_raw:
 	push ix
 	call read_sector
@@ -459,6 +450,11 @@ rd_sector_raw:
 	ret c
 	or a
 	ret
+
+	IFNDEF RO
+	;	// wr_sector_raw : call the integrator hook, saving the driver's IX
+	;	//   the driver's IX (active handle pointer) across the call.
+	;	//   in: HL=buffer, DEBC=LBA.  out: CF.
 wr_sector_raw:
 	push ix
 	call write_sector
@@ -466,6 +462,7 @@ wr_sector_raw:
 	ret c
 	or a
 	ret
+	ENDIF
 ;	// add16 : (HL) += DE  (DE treated as unsigned 16-bit).  preserves HL,DE.
 add16:
 	push hl
@@ -947,6 +944,7 @@ fat_get:
 	or a
 	ret
 
+	IFNDEF RO
 ;	// fat_set : write cl_val into the FAT entry for cl_in.  CF=err.
 fat_set:
 	call fat_locate
@@ -1014,6 +1012,7 @@ set_clval_eoc:
 	inc hl
 	ld (hl),0x0F
 	ret
+	ENDIF
 
 ;	// clus_is_last : in (HL)=32-bit value -> CF=1 if terminal/unusable.
 clus_is_last:
@@ -1062,6 +1061,7 @@ clus_to_lba:
 	pop hl
 	ret
 
+	IFNDEF RO
 ;	// fat_alloc : allocate a free cluster, link it EOC -> cl_out.  CF=err.
 fat_alloc:
 	ld hl,fat_vol+VOL_CLUSCNT
@@ -1143,6 +1143,7 @@ fat_free_chain:
 .done:
 	or a
 	ret
+	ENDIF
 ;	// =====================================================================
 ;	// directory layer
 ;	// =====================================================================
@@ -1347,6 +1348,7 @@ ent_get_clus:
 	pop hl
 	ret
 
+	IFNDEF RO
 ;	// ent_put_clus : in HL -> entry, cl_tmp = cluster; store into entry.
 ent_put_clus:
 	push hl
@@ -1368,6 +1370,7 @@ ent_put_clus:
 	ld (hl),a
 	pop hl
 	ret
+	ENDIF
 
 ;	// =====================================================================
 ;	// directory iterator
@@ -1561,6 +1564,7 @@ dir_scan:
 	scf
 	ret
 
+	IFNDEF RO
 ;	// dir_alloc_entry : find / create a free 32-byte slot in directory
 ;	//   cl_dir.  out: found_lba/found_off = slot location; CF=err.
 dir_alloc_entry:
@@ -1708,6 +1712,7 @@ set_entry_datetime:
 	ld (found_ent+DE_WRTDATE),hl
 	ld (found_ent+DE_ACCDATE),hl
 	ret
+	ENDIF
 
 ;	// =====================================================================
 ;	// path resolution
@@ -1909,13 +1914,20 @@ pos_breakdown:
 	ret
 
 ;	// file_locate : make FH_CCLUS the cluster at index pb_cidx.
+	IFNDEF RO
 ;	//   io_extend = 1 allocates clusters as needed; 0 fails past the end.
+	ENDIF
 ;	//   IX = handle.  CF=1 on error.
 file_locate:
 	ld c,FH_FCLUS
 	call hfield
 	call iszero32
 	jr nz,.havefc
+	IFDEF RO
+	ld a,FE_RANGE
+	scf
+	ret
+	ELSE
 	ld a,(io_extend)
 	or a
 	jr nz,.alloc1
@@ -1931,6 +1943,7 @@ file_locate:
 	ld hl,cl_out
 	call mov32
 	set 0,(ix+FH_FLAGS)
+	ENDIF
 .havefc:
 	ld c,FH_CCLUS
 	call hfield
@@ -1971,6 +1984,10 @@ file_locate:
 	ret c
 	ld hl,cl_out
 	call clus_is_last
+	IFDEF RO
+	jr c,.rangeerr
+	jr .advance
+	ELSE
 	jr nc,.advance
 	ld a,(io_extend)
 	or a
@@ -1985,6 +2002,7 @@ file_locate:
 	call mov32
 	call fat_set
 	ret c
+	ENDIF
 .advance:
 	ld hl,cl_out
 	ld de,wclus
@@ -2136,6 +2154,7 @@ fat_read:
 	scf
 	ret
 
+	IFNDEF RO
 ;	// =====================================================================
 ;	// fat_write
 ;	// =====================================================================
@@ -2217,6 +2236,7 @@ fat_write:
 	ld a,FE_RDONLY
 	scf
 	ret
+	ENDIF
 
 ;	// =====================================================================
 ;	// fat_seek / fat_tell
@@ -2300,6 +2320,14 @@ fat_tell:
 ;	// =====================================================================
 fat_open:
 	ld (open_mode),a
+	IFDEF RO
+	and %11111110
+	jr z,.modeok
+	ld a,FE_RDONLY
+	scf
+	ret
+.modeok:
+	ENDIF
 	push hl
 	call handle_alloc
 	pop hl
@@ -2307,10 +2335,15 @@ fat_open:
 	ld (open_h),a
 	ld (open_ix),ix
 	call path_find
+	IFDEF RO
+	ret c
+	ELSE
 	jr c,.notfound
+	ENDIF
 	ld a,(found_ent+DE_ATTR)
 	and ATTR_DIR
 	jr nz,.eisdir
+	IFNDEF RO
 	ld a,(open_mode)
 	and %00001100
 	cp %00000100
@@ -2338,6 +2371,7 @@ fat_open:
 	call open_into_handle
 	ret c
 .done:
+	ENDIF
 	ld ix,(open_ix)
 	ld (ix+FH_INUSE),1
 	ld a,(open_h)
@@ -2347,6 +2381,7 @@ fat_open:
 	ld a,FE_ISDIR
 	scf
 	ret
+	IFNDEF RO
 .eexist:
 	ld a,FE_EXIST
 	scf
@@ -2356,13 +2391,18 @@ fat_open:
 .fail:
 	scf
 	ret
+	ENDIF
 
 ;	// open_into_handle : populate the handle from found_ent.
 open_into_handle:
 	ld ix,(open_ix)
+	IFDEF RO
+	ld (ix+FH_MODE),MD_READ
+	ELSE
 	ld a,(open_mode)
 	and %00000011
 	ld (ix+FH_MODE),a
+	ENDIF
 	ld hl,found_ent
 	call ent_get_clus
 	ld c,FH_FCLUS
@@ -2402,6 +2442,7 @@ open_into_handle:
 	or a
 	ret
 
+	IFNDEF RO
 ;	// make_empty_file : create a zero-length file in directory cl_dir
 ;	//   using name83.  Fills found_ent/found_lba/found_off.
 make_empty_file:
@@ -2499,7 +2540,9 @@ sync_ix:
 	call cache_dirty_sel
 .flushonly:
 	jp cache_flush_all
+	ENDIF
 
+	IFNDEF RO
 ;	// fat_close : A=handle -> sync and release the handle.
 fat_close:
 	call handle_ptr
@@ -2509,6 +2552,15 @@ fat_close:
 	ld (ix+FH_INUSE),0
 	pop af
 	ret
+	ELSE
+;	// fat_close : A=handle -> release the handle.
+fat_close:
+	call handle_ptr
+	ret c
+	ld (ix+FH_INUSE),0
+	or a
+	ret
+	ENDIF
 
 ;	// =====================================================================
 ;	// fat_opendir / fat_readdir
@@ -2727,6 +2779,7 @@ fill_rd_buf:
 	add hl,bc
 	ex de,hl
 	jp mov32
+	IFNDEF RO
 ;	// =====================================================================
 ;	// high-level operations
 ;	// =====================================================================
@@ -3095,6 +3148,7 @@ fat_truncate:
 	ld a,FE_RDONLY
 	scf
 	ret
+	ENDIF
 
 ;	// =====================================================================
 ;	// driver RAM  (uninitialised working storage)

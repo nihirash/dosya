@@ -1,6 +1,5 @@
-
 ; ---------------------------------------------------------------------------
-; SD / SPI
+; divMMC-compatible SD over SPI implementation
 ; ---------------------------------------------------------------------------
 SPI_CTL         equ #e7
 SPI_DATA        equ #eb
@@ -69,6 +68,7 @@ sd_cmd:
     or a
     ret
 
+	IFNDEF RO
 sd_wait_not_ff:
     ld bc, #32
 .wait:
@@ -84,6 +84,7 @@ sd_wait_not_ff:
 .ok:
     or a
     ret
+	ENDIF
 
 sd_arg_zero:
     xor a
@@ -366,6 +367,7 @@ read_sector:
     or a
     ret
 
+	IFNDEF RO
 write_sector:
     ld (rw_buf), hl
     call sd_set_lba_arg
@@ -419,6 +421,7 @@ write_sector:
     call sd_deselect
     scf
     ret
+	ENDIF
 
 
 sd_cmd_byte         db 0
@@ -428,4 +431,6 @@ sd_v2               db 0
 sd_retry            dw 0
 sd_arg              db 0, 0, 0, 0
 rw_buf              dw 0
+	IFNDEF RO
 sd_last_resp        db 0
+	ENDIF

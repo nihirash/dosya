@@ -1,2 +1,4 @@
 *.bin
 *.tap
+.agents/
+AGENTS.md

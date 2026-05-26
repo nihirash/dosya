@@ -1,3 +1,5 @@
+    DEFINE RO
+    
     DEVICE ZXSPECTRUM48
     org #8000
 start:
@@ -115,9 +117,6 @@ putC:
     rst 16
     ret
 
-    include "full/spi.asm"
-    include "common/cwd.asm"
-    include "full/fat.asm"
+    include "../src/dosya.asm"
 
-    savebin "test.bin", $8000, $ - $8000
-    savetap "test.tap", start
+    savetap "list.tap", start
