@@ -2,7 +2,9 @@
 
 DOSYA (`Дося`) is a DOS/FAT filesystem implementation for Z80 computers.
 
-It is built with `sjasmplus`, exposes a small POSIX-like file and directory API, and supports FAT16 and FAT32 volumes. Parts of DOSYA are based on UnoDOS 3.0: [source-solutions/unodos3](https://github.com/source-solutions/unodos3).
+It is built with `sjasmplus`, exposes a small POSIX-like file and directory API, and supports FAT16 and FAT32 volumes. 
+
+Parts of DOSYA are based on UnoDOS 3.0: [source-solutions/unodos3](https://github.com/source-solutions/unodos3).
 
 ## Source Layout
 
@@ -19,16 +21,6 @@ Define `RO` before including `src/dosya.asm` for a read-only build. Omit `RO` fo
 - `sjasmplus` 1.23 or newer
 - A Z80 target or emulator compatible with the assembled output
 - For the bundled transport, SD/SPI hardware compatible with the ports used in `src/spi.asm`
-
-## Build
-
-Read-only example build:
-
-```sh
-sjasmplus example/list.asm
-```
-
-The generated `list.tap` file is ignored by git.
 
 ## Include DOSYA
 
