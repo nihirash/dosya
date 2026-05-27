@@ -1,5 +1,7 @@
 # DOSYA
 
+![logo](docs/logo.jpg)
+
 DOSYA (`Дося`) is a DOS/FAT filesystem implementation for Z80 computers.
 
 It is built with `sjasmplus`, exposes a small POSIX-like file and directory API, and supports FAT16 and FAT32 volumes.
