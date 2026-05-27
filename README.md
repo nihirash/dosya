@@ -39,27 +39,69 @@ Use `src/dosya.asm` as the library entry point.
 This example initializes the path layer, SD/SPI driver, and FAT volume through `dosya_init`, then opens the root directory and reads one entry.
 
 ```asm
-    call dosya_init
-    ret c
+    ld hl, .vol_name
+    call fat_getlabel
 
-    ld hl, root_path
+    ld hl, .vol
+    call printZ
+    
+    ld a, 13
+    call putC
+
+    ld hl, path
+    call path_get
+
+    ld hl, .path
+    call printZ
+
+    ld a, 13 
+    call putC 
+    ld a, 13
+    call putC
+
+    ld hl, path
     call fopendir
     ret c
-    ld (dir_handle), a
 
-    ld a, (dir_handle)
-    ld hl, dir_entry
+    ld (handle), a
+.loop:
+    ld a, (handle)
+    ld hl, dir_buf
     call freaddir
     jr c, .done
 
-.done:
-    ld a, (dir_handle)
-    call fclose
-    ret
+    ld hl, dir_buf + 1
+    call printZ
 
-root_path db "/",0
-dir_handle db 0
-dir_entry ds 18
+    ld a, (dir_buf)
+    and ATTR_DIR
+    jr z, .file
+
+    ld a, '/'
+    call putC
+.file
+    ld a, 13
+    call putC
+
+    jr .loop
+.done:
+    ld a, 13 : call putC
+    
+    ld a, (handle)
+    jp fclose
+    
+.vol:
+    db "Volume: "
+.vol_name
+    ds 13
+.path:
+    db "Directory of "
+path: ds PATH_MAX
+    db 0
+    
+dir_buf:
+    ds 18
+handle: db 0
 ```
 
 For lower-level control, call `path_init`, `sd_init`, and `fat_mount` directly.
