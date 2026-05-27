@@ -120,8 +120,6 @@ dir_buf:
 handle: db 0
 ```
 
-For lower-level control, call `path_init`, `sd_init`, and `fat_mount` directly.
-
 ## Examples
 
 - `sjasmplus example/list.asm` builds the read-only directory listing example.
