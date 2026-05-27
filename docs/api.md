@@ -1,8 +1,17 @@
 # DOSYA API
 
-All public FAT routines return with carry clear on success. On failure, carry is set and `A` contains an error code unless the routine notes otherwise.
+`src/dosya.asm` is the library entry point. Define `RO` before including it for a read-only build. Omit `RO` to assemble writable entry points as well.
 
-Error codes:
+```asm
+    DEFINE RO
+    include "src/dosya.asm"
+```
+
+All public filesystem routines return with carry clear on success. On failure, carry is set and `A` contains an error code unless the routine notes otherwise.
+
+Writable builds add `fwrite`, `fsync`, `ftruncate`, `unlink`, `mkdir`, `rmdir`, `frename`, and `write_sector`. These entry points are omitted when `RO` is defined.
+
+## Error Codes
 
 - `FE_OK = 0`
 - `FE_IO = 1`
@@ -19,29 +28,6 @@ Error codes:
 - `FE_RANGE = 12`
 - `FE_RDONLY = 13`
 
-Open mode bits for `fat_open`:
-
-- bit 0: read access
-- bit 1: write access, writable build only
-- bits 2-3: disposition, writable build only
-  - `%00`: open existing
-  - `%01`: create new
-  - `%10`: open always
-  - `%11`: create always
-
-Directory records returned by `fat_readdir` are 18 bytes:
-
-- `+0`: FAT attribute byte
-- `+1`: 8.3 ASCIIZ name, up to 13 bytes including terminator
-- `+14`: file size, 32-bit little-endian
-
-Use `src/dosya.asm` as the library include entry point. Define `RO` before including it for read-only builds.
-
-```asm
-    DEFINE RO
-    include "src/dosya.asm"
-```
-
 ## Contents
 
 - [Initialization](#initialization)
@@ -49,70 +35,42 @@ Use `src/dosya.asm` as the library include entry point. Define `RO` before inclu
 - [Directories](#directories)
 - [File System Mutation](#file-system-mutation)
 - [Volume Metadata](#volume-metadata)
-- [Current Directory Helpers](#current-directory-helpers)
-- [Platform Hooks](#platform-hooks)
+- [Path Helpers](#path-helpers)
 
 ## Initialization
 
-### `sd_init`
+### `dosya_init`
 
-Initializes the bundled SD/SPI driver.
-
-Registers:
-
-- Input: none
-- Success: carry clear
-- Failure: carry set, `A` contains a driver error code
-
-Example:
-
-```asm
-    call sd_init
-    ret c
-```
-
-### `fat_mount`
-
-Mounts the first FAT16/FAT32 volume.
+Initializes the path layer, the bundled SD/SPI driver, and mounts the first FAT16 or FAT32 volume.
 
 Registers:
 
 - Input: none
 - Success: carry clear
-- Failure: carry set, `A` contains an `FE_*` error code
+- Failure: carry set, `A` contains an `sd_init` driver code or an `FE_*` mount error
 
 Example:
 
 ```asm
-    call sd_init
+    call dosya_init
     ret c
-    call fat_mount
-    ret c
-```
-
-### `cwd_init`
-
-Resets the current working directory to `/`.
-
-Registers:
-
-- Input: none
-- Output: current directory becomes `/`
-- Failure: none
-
-Example:
-
-```asm
-    call fat_mount
-    ret c
-    call cwd_init
 ```
 
 ## Files
 
-### `fat_open`
+### `fopen`
 
-Opens a file and returns a file handle.
+Opens a file and returns a handle.
+
+The open mode byte passed in `A` uses the following constants:
+
+- `FA_READ = %0001`
+- `FA_WRITE = %0010`
+- `FA_CREATE_NEW = %0100`
+- `FA_OPEN_ALWAYS = %1000`
+- `FA_CREATE_ALWAYS = %1100`
+
+The writable disposition bits are meaningful only in writable builds.
 
 Registers:
 
@@ -124,8 +82,8 @@ Example:
 
 ```asm
     ld hl, file_name
-    ld a, %00000001
-    call fat_open
+    ld a, FA_READ
+    call fopen
     ret c
     ld (file_handle), a
 
@@ -133,9 +91,9 @@ file_name db "/README.TXT",0
 file_handle db 0
 ```
 
-### `fat_close`
+### `fclose`
 
-Closes a file or directory handle. In writable builds, dirty data is synced before the handle is released.
+Closes a file or directory handle. In writable builds, dirty file data is synced before the handle is released.
 
 Registers:
 
@@ -147,11 +105,11 @@ Example:
 
 ```asm
     ld a, (file_handle)
-    call fat_close
+    call fclose
     ret c
 ```
 
-### `fat_read`
+### `fread`
 
 Reads bytes from an open file.
 
@@ -167,13 +125,13 @@ Example:
     ld a, (file_handle)
     ld hl, read_buf
     ld bc, 128
-    call fat_read
+    call fread
     ret c
 
 read_buf ds 128
 ```
 
-### `fat_write`
+### `fwrite`
 
 Writes bytes to an open file. This entry point is available only in writable builds.
 
@@ -189,23 +147,23 @@ Example:
     ld a, (file_handle)
     ld hl, write_buf
     ld bc, write_len
-    call fat_write
+    call fwrite
     ret c
 
 write_buf db "OK",13,10
 write_len equ $-write_buf
 ```
 
-### `fat_seek`
+### `fseek`
 
-Moves a file handle position. Seeking is clamped to the file size.
+Moves the file position. Seeking is clamped to the current file size.
 
 Registers:
 
 - Input: `A` = handle, `B` = whence, `DEHL` = unsigned offset
 - `B = 0`: set absolute position
-- `B = 1`: move forward from current position
-- `B = 2`: move backward from current position
+- `B = 1`: move forward from the current position
+- `B = 2`: move backward from the current position
 - Success: carry clear, `DEHL` = new position
 - Failure: carry set, `A` contains an `FE_*` error code
 
@@ -216,13 +174,13 @@ Example:
     ld b, 0
     ld de, 0
     ld hl, 0
-    call fat_seek
+    call fseek
     ret c
 ```
 
-### `fat_tell`
+### `ftell`
 
-Returns the current file handle position.
+Returns the current file position.
 
 Registers:
 
@@ -234,11 +192,11 @@ Example:
 
 ```asm
     ld a, (file_handle)
-    call fat_tell
+    call ftell
     ret c
 ```
 
-### `fat_sync`
+### `fsync`
 
 Flushes dirty file data and directory metadata. This entry point is available only in writable builds.
 
@@ -252,11 +210,11 @@ Example:
 
 ```asm
     ld a, (file_handle)
-    call fat_sync
+    call fsync
     ret c
 ```
 
-### `fat_truncate`
+### `ftruncate`
 
 Truncates an open file to its current position. This entry point is available only in writable builds.
 
@@ -270,13 +228,13 @@ Example:
 
 ```asm
     ld a, (file_handle)
-    call fat_truncate
+    call ftruncate
     ret c
 ```
 
 ## Directories
 
-### `fat_opendir`
+### `fopendir`
 
 Opens a directory and returns a directory handle.
 
@@ -290,7 +248,7 @@ Example:
 
 ```asm
     ld hl, dir_name
-    call fat_opendir
+    call fopendir
     ret c
     ld (dir_handle), a
 
@@ -298,22 +256,28 @@ dir_name db "/",0
 dir_handle db 0
 ```
 
-### `fat_readdir`
+### `freaddir`
 
 Reads the next directory entry into an 18-byte record.
+
+`freaddir` writes an 18-byte record to `HL`:
+
+- `+0`: FAT attribute byte
+- `+1`: 8.3 ASCIIZ name, up to 13 bytes including terminator
+- `+14`: file size, 32-bit little-endian
 
 Registers:
 
 - Input: `A` = directory handle, `HL` = destination record
 - Success: carry clear, record at `HL` is filled
-- Failure: carry set. End of directory is reported as carry set.
+- Failure: carry set, `A = FE_NOENT` at end of directory, or another `FE_*` code on error
 
 Example:
 
 ```asm
     ld a, (dir_handle)
     ld hl, dir_entry
-    call fat_readdir
+    call freaddir
     jr c, .done
 
 .done:
@@ -322,49 +286,9 @@ Example:
 dir_entry ds 18
 ```
 
-### `fat_mkdir`
-
-Creates a directory. This entry point is available only in writable builds.
-
-Registers:
-
-- Input: `HL` = ASCIIZ path
-- Success: carry clear
-- Failure: carry set, `A` contains an `FE_*` error code
-
-Example:
-
-```asm
-    ld hl, new_dir
-    call fat_mkdir
-    ret c
-
-new_dir db "/LOGS",0
-```
-
-### `fat_rmdir`
-
-Removes an empty directory. This entry point is available only in writable builds.
-
-Registers:
-
-- Input: `HL` = ASCIIZ path
-- Success: carry clear
-- Failure: carry set, `A` contains an `FE_*` error code
-
-Example:
-
-```asm
-    ld hl, old_dir
-    call fat_rmdir
-    ret c
-
-old_dir db "/EMPTY",0
-```
-
 ## File System Mutation
 
-### `fat_unlink`
+### `unlink`
 
 Deletes a file. This entry point is available only in writable builds.
 
@@ -378,13 +302,53 @@ Example:
 
 ```asm
     ld hl, old_file
-    call fat_unlink
+    call unlink
     ret c
 
 old_file db "/OLD.LOG",0
 ```
 
-### `fat_rename`
+### `mkdir`
+
+Creates a directory. This entry point is available only in writable builds.
+
+Registers:
+
+- Input: `HL` = ASCIIZ path
+- Success: carry clear
+- Failure: carry set, `A` contains an `FE_*` error code
+
+Example:
+
+```asm
+    ld hl, new_dir
+    call mkdir
+    ret c
+
+new_dir db "/LOGS",0
+```
+
+### `rmdir`
+
+Removes an empty directory. This entry point is available only in writable builds.
+
+Registers:
+
+- Input: `HL` = ASCIIZ path
+- Success: carry clear
+- Failure: carry set, `A` contains an `FE_*` error code
+
+Example:
+
+```asm
+    ld hl, old_dir
+    call rmdir
+    ret c
+
+old_dir db "/EMPTY",0
+```
+
+### `frename`
 
 Renames or moves a file or directory. Moving a directory to another parent does not rewrite its `..` entry.
 
@@ -399,7 +363,7 @@ Example:
 ```asm
     ld hl, old_name
     ld de, new_name
-    call fat_rename
+    call frename
     ret c
 
 old_name db "/OLD.TXT",0
@@ -410,13 +374,13 @@ new_name db "/NEW.TXT",0
 
 ### `fat_getlabel`
 
-Copies the volume label as an ASCIIZ string.
+Copies the volume label as an ASCIIZ string. If no label is present, the destination receives an empty string. This routine always returns with carry clear.
 
 Registers:
 
 - Input: `HL` = destination buffer, at least 12 bytes recommended
 - Success: carry clear
-- Failure: none expected
+- Failure: none
 
 Example:
 
@@ -427,30 +391,32 @@ Example:
 label_buf ds 13
 ```
 
-## Current Directory Helpers
+## Path Helpers
 
-### `cwd_get`
+`PATH_MAX` is defined in `src/path.asm` and is currently `256`.
 
-Copies the current directory as an ASCIIZ path.
+### `path_get`
+
+Copies the current path as an ASCIIZ string.
 
 Registers:
 
-- Input: `HL` = destination buffer, at least `CWD_MAX` bytes
-- Success: destination buffer contains the current directory as ASCIIZ
+- Input: `HL` = destination buffer, at least `PATH_MAX` bytes
+- Success: destination buffer contains the current path as ASCIIZ
 - Failure: none
 
 Example:
 
 ```asm
-    ld hl, cwd_buf
-    call cwd_get
+    ld hl, path_buf
+    call path_get
 
-cwd_buf ds CWD_MAX
+path_buf ds PATH_MAX
 ```
 
-### `cwd_chdir`
+### `chdir`
 
-Changes the current directory after validating it with `fat_opendir`.
+Changes the current path after validating the target directory with `fopendir`.
 
 Registers:
 
@@ -462,20 +428,20 @@ Example:
 
 ```asm
     ld hl, sub_dir
-    call cwd_chdir
+    call chdir
     ret c
 
 sub_dir db "SUB",0
 ```
 
-### `cwd_join`
+### `path_join`
 
-Builds an absolute path from the current directory and a file name or path.
+Builds an absolute path from the current path and a file name or path.
 
 Registers:
 
 - Input: `HL` = ASCIIZ file name or path, `DE` = destination buffer
-- Success: carry clear, destination buffer contains an ASCIIZ path
+- Success: carry clear, destination buffer contains an ASCIIZ absolute path
 - Failure: carry set, `A` contains `FE_BADNAME`
 
 Example:
@@ -483,51 +449,9 @@ Example:
 ```asm
     ld hl, rel_file
     ld de, joined_path
-    call cwd_join
+    call path_join
     ret c
 
 rel_file db "FILE.TXT",0
-joined_path ds CWD_MAX
-```
-
-## Platform Hooks
-
-### `read_sector`
-
-Reads one 512-byte sector. Integrators must provide this routine, or include `src/spi.asm`.
-
-Registers:
-
-- Input: `HL` = 512-byte buffer, `DEBC` = 32-bit LBA
-- Success: carry clear
-- Failure: carry set
-- May corrupt: all registers
-
-Example:
-
-```asm
-read_sector:
-    ; Platform-specific sector read goes here.
-    scf
-    ret
-```
-
-### `write_sector`
-
-Writes one 512-byte sector. Writable builds require this routine, or `src/spi.asm` can provide it when `RO` is not defined.
-
-Registers:
-
-- Input: `HL` = 512-byte buffer, `DEBC` = 32-bit LBA
-- Success: carry clear
-- Failure: carry set
-- May corrupt: all registers
-
-Example:
-
-```asm
-write_sector:
-    ; Platform-specific sector write goes here.
-    scf
-    ret
+joined_path ds PATH_MAX
 ```

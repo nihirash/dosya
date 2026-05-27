@@ -1,18 +1,17 @@
 ; ---------------------------------------------------------------------------
-; divMMC-compatible SD over SPI implementation
+; Z-Controller/divMMC-compatible SD over SPI implementation
 ; ---------------------------------------------------------------------------
+    IFDEF ZC
+SPI_CTL         equ #77
+SPI_DATA        equ #57
+SD_CS_ON        equ #01
+SD_CS_OFF       equ #03
+    ELSE
 SPI_CTL         equ #e7
 SPI_DATA        equ #eb
 SD_CS_ON        equ #fe
 SD_CS_OFF       equ #ff
-
-spi_send:
-    out (SPI_DATA), a
-    ret
-
-spi_recv:
-    in a, (SPI_DATA)
-    ret
+    ENDIF
 
 sd_select:
     ld a, (sd_select_value)
@@ -23,7 +22,7 @@ sd_deselect:
     ld a, SD_CS_OFF
     out (SPI_CTL), a
     ld a, #ff
-    call spi_send
+    out (SPI_DATA), a
     ret
 
 ; sd_cmd: A=command byte, sd_arg[0..3]=MSB..LSB. Returns R1 in A, CF=1 timeout.
@@ -31,13 +30,13 @@ sd_cmd:
     ld (sd_cmd_byte), a
     call sd_select
     ld a, (sd_cmd_byte)
-    call spi_send
+    out (SPI_DATA), a
     ld hl, sd_arg
     ld b, 4
 .arg:
     ld a, (hl)
     inc hl
-    call spi_send
+    out (SPI_DATA), a
     djnz .arg
     ld a, (sd_cmd_byte)
     cp #40
@@ -52,10 +51,10 @@ sd_cmd:
 .crc_ff:
     ld a, #ff
 .crc:
-    call spi_send
+    out (SPI_DATA), a
     ld bc, #32
 .wait:
-    call spi_recv
+    in a, (SPI_DATA)
     cp #ff
     jr nz, .ok
     djnz .wait
@@ -72,7 +71,7 @@ sd_cmd:
 sd_wait_not_ff:
     ld bc, #32
 .wait:
-    call spi_recv
+    in a, (SPI_DATA)
     cp #ff
     jr nz, .ok
     djnz .wait
@@ -112,8 +111,6 @@ sd_init:
     call sd_init_try
     ret c
 .ok:
-    ld a, 1
-    ld (sd_blockaddr), a
     xor a
     ret
 
@@ -125,7 +122,7 @@ sd_init_try:
     ld b, 12
 .warm:
     ld a, #ff
-    call spi_send
+    out (SPI_DATA), a
     djnz .warm
 
     call sd_arg_zero
@@ -161,16 +158,16 @@ sd_init_try:
     jp nz, .fail2
     ld a, 1
     ld (sd_v2), a
-    call spi_recv
+    in a, (SPI_DATA)
     or a
     jp nz, .fail2
-    call spi_recv
+    in a, (SPI_DATA)
     or a
     jp nz, .fail2
-    call spi_recv
+    in a, (SPI_DATA)
     cp #01
     jp nz, .fail2
-    call spi_recv
+    in a, (SPI_DATA)
     cp #aa
     jp nz, .fail2
     call sd_deselect
@@ -246,20 +243,22 @@ sd_init_try:
     jr c, .fail4
     or a
     jr nz, .fail4
-    call spi_recv
+    in a, (SPI_DATA)
     and #40
+    ld a, 0
     jr z, .ocr_tail
-    ld a, 1
+    inc a
     ld (sd_blockaddr), a
 .ocr_tail:
-    call spi_recv
-    call spi_recv
-    call spi_recv
-    ld a, 1
-    ld (sd_blockaddr), a
+    in a, (SPI_DATA) : nop 
+    in a, (SPI_DATA) : nop 
+    in a, (SPI_DATA) : nop 
     call sd_deselect
+    ld a, (sd_blockaddr)
+    or a
+    jr nz, .init_ok
 
-    ; SET_BLOCKLEN 512 keeps SDSC cards usable and is harmless on SDHC.
+    ; SET_BLOCKLEN 512 is required for byte-addressed cards.
 .cmd16:
     xor a
     ld (sd_arg+0), a
@@ -279,8 +278,6 @@ sd_init_try:
     scf
     ret
 .init_ok:
-    ld a, 1
-    ld (sd_blockaddr), a
     xor a
     ret
 .fail2:
@@ -302,11 +299,21 @@ sd_init_try:
     scf
     ret
 
-; Input DEBC=LBA. Output sd_arg=block address.
-; The tested divMMC setup presents legacy init responses but needs block LBAs.
+; Input DEBC=LBA. Output sd_arg=card command address.
+; SDSC/MMC cards want byte addresses, while SDHC/SDXC cards want block LBAs.
 sd_set_lba_arg:
-    ld a, 1
-    ld (sd_blockaddr), a
+    ld a, (sd_blockaddr)
+    or a
+    jr nz, .store
+    ld a, 9
+.shift:
+    sla c
+    rl b
+    rl e
+    rl d
+    dec a
+    jr nz, .shift
+.store:
     ld a, d
     ld (sd_arg+0), a
     ld a, e
@@ -327,7 +334,7 @@ read_sector:
     jr nz, .fail
     ld hl, 0
 .tok:
-    call spi_recv
+    in a, (SPI_DATA) 
     cp #fe
     jr z, .data
     inc hl
@@ -345,7 +352,7 @@ read_sector:
     ; reads. Drain a few repeated token echoes before storing sector byte 0.
     ld b, 4
 .align:
-    call spi_recv
+    in a, (SPI_DATA) 
     cp #fe
     jr nz, .first
     djnz .align
@@ -354,15 +361,15 @@ read_sector:
     inc hl
     ld de, 511
 .rdloop:
-    call spi_recv
+    in a, (SPI_DATA) 
     ld (hl), a
     inc hl
     dec de
     ld a, d
     or e
     jr nz, .rdloop
-    call spi_recv
-    call spi_recv
+    in a, (SPI_DATA) : nop 
+    in a, (SPI_DATA) : nop 
     call sd_deselect
     or a
     ret

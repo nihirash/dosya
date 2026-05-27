@@ -1,41 +1,31 @@
 ;	// ---------------------------------------------------------------------
 ;	// PUBLIC API   (all routines: CF=0 ok / CF=1 fail with A = error code)
 ;	// ---------------------------------------------------------------------
-;	//
 ;	//   fat_mount                      mount first FAT16/32 volume
 ;	//   fat_getlabel HL=buf            copy volume label (ASCIIZ) to buf
-;	//   fat_open    HL=path A=mode     -> A = file handle
-;	//   fat_close   A=handle
-;	//   fat_read    A=handle HL=buf BC=count   -> BC = bytes read
-;	//   fat_write   A=handle HL=buf BC=count   -> BC = bytes written
-;	//   fat_seek    A=handle B=whence DEHL=off -> DEHL = new position
-;	//   fat_tell    A=handle                   -> DEHL = position
-;	//   fat_sync    A=handle           flush a file's data + dir entry
-;	//   fat_opendir HL=path            -> A = dir handle
-;	//   fat_readdir A=handle HL=buf    fill 18-byte entry record
-;	//   fat_unlink  HL=path            delete a file
-;	//   fat_mkdir   HL=path            create a directory
-;	//   fat_rmdir   HL=path            remove an empty directory
-;	//   fat_rename  HL=oldpath DE=newpath
-;	//   fat_truncate A=handle          truncate file to current position
+;	//   fopen     	  HL=path A=mode     -> A = file handle
+;	//   fclose    	  A=handle
+;	//   fread        A=handle HL=buf BC=count   -> BC = bytes read
+;	//   fwrite       A=handle HL=buf BC=count   -> BC = bytes written
+;	//   fseek        A=handle B=whence DEHL=off -> DEHL = new position
+;	//   ftell        A=handle                   -> DEHL = position
+;	//   fsync        A=handle           flush a file's data + dir entry
+;	//   fopendir     HL=path            -> A = dir handle
 ;	//
-;	// open mode bits (A in fat_open):
-;	//   bit0  FA_READ        request read access
-;	//   bit1  FA_WRITE       request write access
-;	//   bits2-3  disposition:
-;	//       %00  open existing      (error if missing)
-;	//       %01  create new         (error if exists)
-;	//       %10  open always        (create if missing)
-;	//       %11  create always      (create, or open + truncate)
+;	//   freaddir     A=handle HL=buf    fill 18-byte entry record
+;	// 					readdir record (18 bytes) written to HL:
+;	//   					+0   attributes byte (FAT directory attribute bits)
+;	//   					+1   name, 8.3 ASCIIZ, up to 13 bytes incl. terminator
+;	//   					+14  file size, 32-bit
 ;	//
-;	// readdir record (18 bytes) written to HL:
-;	//   +0   attributes byte (FAT directory attribute bits)
-;	//   +1   name, 8.3 ASCIIZ, up to 13 bytes incl. terminator
-;	//   +14  file size, 32-bit
-;	//
-;	// NOTE: 8.3 short names only -- long file names are not supported.  
-;	// 			 Names are upper-cased on create.
+;	//   unlink       HL=path            delete a file
+;	//   mkdir        HL=path            create a directory
+;	//   rmdir        HL=path            remove an empty directory
+;	//   frename      HL=oldpath DE=newpath
+;	//   ftruncate    A=handle          truncate file to current position
 ;	// =====================================================================
+
+
 
 ;	// ---- error codes -----------------------------------------------------
 FE_OK		equ 0
@@ -52,6 +42,23 @@ FE_BADF		equ 10			;	// bad file handle
 FE_NOTEMPTY	equ 11			;	// directory not empty
 FE_RANGE	equ 12			;	// seek / position out of range
 FE_RDONLY	equ 13			;	// handle not opened for that access
+
+;	// ---- file open modes -------------------------------------------------
+
+;	// open mode bits (A in fopen):
+;	//   bit0  FA_READ        request read access
+;	//   bit1  FA_WRITE       request write access
+;	//   bits2-3  disposition:
+;	//       %00  open existing      (error if missing)
+;	//       %01  create new         (error if exists)
+;	//       %10  open always        (create if missing)
+;	//       %11  create always      (create, or open + truncate)
+FA_READ 	     equ %0001
+FA_WRITE 	     equ %0010
+FA_CREATE_NEW    equ %0100
+FA_OPEN_ALWAYS   equ %1000
+FA_CREATE_ALWAYS equ %1100
+
 
 ;	// ---- tunables --------------------------------------------------------
 FAT_MAXH	equ 4			;	// number of simultaneous file handles
@@ -2069,9 +2076,9 @@ io_advance:
 	ret
 
 ;	// =====================================================================
-;	// fat_read
+;	// fread
 ;	// =====================================================================
-fat_read:
+fread:
 	push hl
 	push bc
 	call handle_ptr
@@ -2156,9 +2163,9 @@ fat_read:
 
 	IFNDEF RO
 ;	// =====================================================================
-;	// fat_write
+;	// fwrite
 ;	// =====================================================================
-fat_write:
+fwrite:
 	push hl
 	push bc
 	call handle_ptr
@@ -2239,12 +2246,12 @@ fat_write:
 	ENDIF
 
 ;	// =====================================================================
-;	// fat_seek / fat_tell
+;	// fseek / ftell
 ;	// =====================================================================
 
-;	// fat_seek : A=handle, B=whence (0 set / 1 fwd-from-cur / 2 back),
+;	// fseek : A=handle, B=whence (0 set / 1 fwd-from-cur / 2 back),
 ;	//   DE:HL = unsigned offset.  out: DE:HL = new position.
-fat_seek:
+fseek:
 	ld (seek_off+0),hl
 	ld (seek_off+2),de
 	ld a,b
@@ -2304,8 +2311,8 @@ fat_seek:
 	or a
 	ret
 
-;	// fat_tell : A=handle -> DE:HL = current position.
-fat_tell:
+;	// ftell : A=handle -> DE:HL = current position.
+ftell:
 	call handle_ptr
 	ret c
 	ld l,(ix+FH_POS+0)
@@ -2316,9 +2323,9 @@ fat_tell:
 	ret
 
 ;	// =====================================================================
-;	// fat_open
+;	// fopen
 ;	// =====================================================================
-fat_open:
+fopen:
 	ld (open_mode),a
 	IFDEF RO
 	and %11111110
@@ -2343,7 +2350,10 @@ fat_open:
 	ld a,(found_ent+DE_ATTR)
 	and ATTR_DIR
 	jr nz,.eisdir
-	IFNDEF RO
+	IFDEF RO
+	call open_into_handle
+	ret c
+	ELSE
 	ld a,(open_mode)
 	and %00001100
 	cp %00000100
@@ -2498,11 +2508,11 @@ trunc_to_zero:
 	ret
 
 ;	// =====================================================================
-;	// fat_sync / fat_close
+;	// fsync / fclose
 ;	// =====================================================================
 
-;	// fat_sync : A=handle -> flush file data and the directory entry.
-fat_sync:
+;	// fsync : A=handle -> flush file data and the directory entry.
+fsync:
 	call handle_ptr
 	ret c
 ;	// sync_ix : flush for the handle at IX.
@@ -2543,8 +2553,8 @@ sync_ix:
 	ENDIF
 
 	IFNDEF RO
-;	// fat_close : A=handle -> sync and release the handle.
-fat_close:
+;	// fclose : A=handle -> sync and release the handle.
+fclose:
 	call handle_ptr
 	ret c
 	call sync_ix
@@ -2553,8 +2563,8 @@ fat_close:
 	pop af
 	ret
 	ELSE
-;	// fat_close : A=handle -> release the handle.
-fat_close:
+;	// fclose : A=handle -> release the handle.
+fclose:
 	call handle_ptr
 	ret c
 	ld (ix+FH_INUSE),0
@@ -2563,9 +2573,9 @@ fat_close:
 	ENDIF
 
 ;	// =====================================================================
-;	// fat_opendir / fat_readdir
+;	// fopendir / freaddir
 ;	// =====================================================================
-fat_opendir:
+fopendir:
 	push hl
 	call handle_alloc
 	pop hl
@@ -2610,9 +2620,9 @@ fat_opendir:
 	scf
 	ret
 
-;	// fat_readdir : A=handle, HL=18-byte record buffer.
+;	// freaddir : A=handle, HL=18-byte record buffer.
 ;	//   CF=0 record filled; CF=1 + A=FE_NOENT at end of directory.
-fat_readdir:
+freaddir:
 	ld (rd_buf),hl
 	call handle_ptr
 	ret c
@@ -2821,8 +2831,8 @@ build_dotent:
 	pop hl
 	jp ent_put_clus
 
-;	// fat_unlink : delete the file at path (HL).
-fat_unlink:
+;	// unlink : delete the file at path (HL).
+unlink:
 	call path_find
 	ret c
 	ld a,(found_isroot)
@@ -2848,8 +2858,8 @@ fat_unlink:
 	scf
 	ret
 
-;	// fat_mkdir : create the directory at path (HL).
-fat_mkdir:
+;	// mkdir : create the directory at path (HL).
+mkdir:
 	call path_find
 	jp nc,.eexist
 	cp FE_NOENT
@@ -2929,8 +2939,8 @@ fat_mkdir:
 	scf
 	ret
 
-;	// fat_rmdir : remove the empty directory at path (HL).
-fat_rmdir:
+;	// rmdir : remove the empty directory at path (HL).
+rmdir:
 	call path_find
 	ret c
 	ld a,(found_isroot)
@@ -2997,10 +3007,10 @@ fat_rmdir:
 	scf
 	ret
 
-;	// fat_rename : rename / move HL=oldpath to DE=newpath.
+;	// frename : rename / move HL=oldpath to DE=newpath.
 ;	//   NOTE: moving a directory to a different parent does not rewrite
 ;	//   its ".." entry.
-fat_rename:
+frename:
 	ld (rn_newp),de
 	call path_find
 	ret c
@@ -3064,8 +3074,8 @@ fat_rename:
 	scf
 	ret
 
-;	// fat_truncate : truncate the open file (A=handle) to its position.
-fat_truncate:
+;	// ftruncate : truncate the open file (A=handle) to its position.
+ftruncate:
 	call handle_ptr
 	ret c
 	bit 1,(ix+FH_MODE)
