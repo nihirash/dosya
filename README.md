@@ -36,9 +36,12 @@ Use `src/dosya.asm` as the library entry point.
 
 ## Minimal API Example
 
-This example initializes the path layer, SD/SPI driver, and FAT volume through `dosya_init`, then opens the root directory and reads one entry.
+This example dosya and prints root directory listing to screen.
 
 ```asm
+
+    call dosya_init
+
     ld hl, .vol_name
     call fat_getlabel
 
@@ -90,6 +93,20 @@ This example initializes the path layer, SD/SPI driver, and FAT volume through `
     ld a, (handle)
     jp fclose
     
+printZ:
+    ld a,(hl)
+    and a
+    ret z
+    push hl
+    call putC
+    pop hl
+    inc hl
+    jr printZ
+
+putC:
+    rst 16
+    ret
+
 .vol:
     db "Volume: "
 .vol_name
@@ -98,7 +115,6 @@ This example initializes the path layer, SD/SPI driver, and FAT volume through `
     db "Directory of "
 path: ds PATH_MAX
     db 0
-    
 dir_buf:
     ds 18
 handle: db 0
