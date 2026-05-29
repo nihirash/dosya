@@ -2,11 +2,13 @@
 ; Z-Controller/divMMC-compatible SD over SPI implementation
 ; ---------------------------------------------------------------------------
     IFDEF ZC
+    DISPLAY "SD card uses Z-Controller interface"
 SPI_CTL         equ #77
 SPI_DATA        equ #57
 SD_CS_ON        equ #01
 SD_CS_OFF       equ #03
     ELSE
+    DISPLAY "SD card uses divMMC/ZXMMC interface"
 SPI_CTL         equ #e7
 SPI_DATA        equ #eb
 SD_CS_ON        equ #fe
@@ -14,15 +16,13 @@ SD_CS_OFF       equ #ff
     ENDIF
 
 sd_select:
-    ld a, (sd_select_value)
+    ld a, SD_CS_ON
     out (SPI_CTL), a
     ret
 
 sd_deselect:
     ld a, SD_CS_OFF
     out (SPI_CTL), a
-    ld a, #ff
-    out (SPI_DATA), a
     ret
 
 ; sd_cmd: A=command byte, sd_arg[0..3]=MSB..LSB. Returns R1 in A, CF=1 timeout.
@@ -94,22 +94,9 @@ sd_arg_zero:
     ret
 
 sd_init:
-    ld a, #f6
-    ld (sd_select_value), a
     call sd_init_try
     jr nc, .ok
-    cp 1
-    ret nz
-    ld a, #f5
-    ld (sd_select_value), a
     call sd_init_try
-    jr nc, .ok
-    cp 1
-    ret nz
-    ld a, #fe
-    ld (sd_select_value), a
-    call sd_init_try
-    ret c
 .ok:
     xor a
     ret
@@ -119,7 +106,7 @@ sd_init_try:
     ld (sd_blockaddr), a
     ld (sd_v2), a
     call sd_deselect
-    ld b, 12
+    ld b, #40
 .warm:
     ld a, #ff
     out (SPI_DATA), a
@@ -348,26 +335,9 @@ read_sector:
     ret
 .data:
     ld hl, (rw_buf)
-    ; Some divMMC setups leave the data token visible for one or two extra
-    ; reads. Drain a few repeated token echoes before storing sector byte 0.
-    ld b, 4
-.align:
-    in a, (SPI_DATA) 
-    cp #fe
-    jr nz, .first
-    djnz .align
-.first:
-    ld (hl), a
-    inc hl
-    ld de, 511
-.rdloop:
-    in a, (SPI_DATA) 
-    ld (hl), a
-    inc hl
-    dec de
-    ld a, d
-    or e
-    jr nz, .rdloop
+    ld bc, SPI_DATA
+    inir : nop
+    inir : nop
     in a, (SPI_DATA) : nop 
     in a, (SPI_DATA) : nop 
     call sd_deselect
@@ -430,9 +400,7 @@ write_sector:
     ret
 	ENDIF
 
-
 sd_cmd_byte         db 0
-sd_select_value     db SD_CS_ON
 sd_blockaddr        db 0
 sd_v2               db 0
 sd_retry            dw 0

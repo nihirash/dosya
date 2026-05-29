@@ -1,5 +1,6 @@
 *.bin
 *.tap
 *.$*
+.DS_Store
 .agents/
 AGENTS.md

@@ -77,6 +77,7 @@ filename db "/bad.zxv",0
     include "../../src/dosya.asm"
 music:
     incbin "ba.pt3"
+    
     IFDEF ZC    
     savehob "bad.$c", "bad.c", start, $ - start
     ELSE
